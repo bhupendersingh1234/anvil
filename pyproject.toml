@@ -1,0 +1,59 @@
+[project]
+name = "anvil"
+version = "0.2.0"
+description = "The Price is Right: product price prediction from text, and an agentic deal hunter built on it"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Bhupender Singh" }]
+dependencies = [
+    "pydantic>=2.7",
+    "datasets>=3.6",
+    "huggingface_hub>=0.30",
+    "python-dotenv>=1.0",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "tqdm>=4.66",
+    "plotly>=5.24",
+    "litellm>=1.77",
+    "openai>=1.109",
+]
+
+[project.optional-dependencies]
+ml = ["torch>=2.4", "xgboost>=2.1"]
+batch = ["groq>=0.33"]
+finetune = ["transformers>=5", "peft>=0.17", "trl>=1.0", "bitsandbytes>=0.47", "accelerate>=1.10"]
+agents = [
+    "torch>=2.4",
+    "chromadb>=1.1",
+    "sentence-transformers>=5.1",
+    "modal>=1.1",
+    "feedparser>=6.0",
+    "beautifulsoup4>=4.12",
+    "requests>=2.32",
+    "gradio>=5.47,<6",
+]
+dev = ["pytest>=8", "ruff>=0.6"]
+all = ["anvil[ml,batch,finetune,agents,dev]"]
+
+[project.scripts]
+anvil = "anvil.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anvil"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 160
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008", "B023", "B905", "E501"]
