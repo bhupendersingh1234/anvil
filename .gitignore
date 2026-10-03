@@ -9,7 +9,7 @@ build/
 .pytest_cache/
 .ruff_cache/
 .ipynb_checkpoints/
-data/
-checkpoints/
+/data/
+/checkpoints/
 wandb/
 *.pth
