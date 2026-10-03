@@ -1,7 +1,7 @@
 [project]
 name = "anvil"
-version = "0.2.0"
-description = "The Price is Right: product price prediction from text, and an agentic deal hunter built on it"
+version = "0.1.0"
+description = "Anvil: product price prediction from text, and an agentic deal hunter built on it"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Bhupender Singh" }]
