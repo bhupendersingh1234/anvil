@@ -1,102 +1,159 @@
-# Anvil
+# Anvil: product price prediction and deal-hunting agents
 
-Predicts what a product costs from its text description, then uses that model inside a team of agents that scans live online deals and sends a push notification when something is priced well below its estimated value.
+Predict what a product costs from its text description, compare 11 ways of doing it on the same data, then use the best predictors inside a team of agents that scans online deals and sends a push notification when something is priced well below its estimated value.
 
-Trained on [Amazon Reviews 2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023) product metadata across 8 categories (Appliances, Automotive, Cell Phones, Electronics, Musical Instruments, Office, Tools, Toys).
+Data: Amazon Reviews 2023 product metadata, 22,000 products across 8 categories (20,000 train, 1,000 validation, 1,000 test).
+
+![Anvil results](docs/results.png)
+
+Interactive version: download [`docs/results.html`](docs/results.html) and open it in a browser.
 
 ## Results
 
-Mean absolute error on **1,000 held-out test products** (lite dataset: 20,000 training items, prices $0.50–$999).
+Metric is average absolute error in dollars on held-out test products (lower is better). Models never see test items during training or retrieval.
 
-| Model | Error | 95% CI | r² |
+### 1,000 test products
+
+| Model | Avg. error | MSE | r² |
 |---|---|---|---|
-| Constant (training mean) | $127.29 | ±$7.03 | -0.3% |
-| XGBoost (bag of words) | $96.43 | ±$6.06 | 34.9% |
-| RAG: gpt-4.1-nano + 5 similar products | $84.11 | ±$8.09 | 16.8% |
-| **Ensemble: RAG + deep residual network, clamped** | **$77.11** | **±$6.74** | **38.7%** |
+| Constant (training mean) | $127.29 | | |
+| XGBoost | $96.43 | | |
+| RAG (Chroma + frontier LLM) | $84.11 | | |
+| Ensemble (RAG 89% + deep NN 11%) | $77.11 | 17,761 | 38.7% |
+| **QLoRA Llama 3.2 3B** | **$74.62** (±5.87) | **14,550** | **49.8%** |
 
-The ensemble cuts error **39% vs the baseline** and **20% vs XGBoost**. RAG alone is accurate on most items but makes occasional $900+ overestimates on products outside the training price range; blending with the neural network and clamping to the data's price range removes those, which is why the ensemble's r² is more than double RAG's.
+QLoRA is 41% better than the constant baseline, 23% better than XGBoost and has 18% lower MSE than the ensemble.
 
-<details>
-<summary>All models (first 200 test products)</summary>
+### 200 test products (all models except QLoRA)
 
-| Model | 2 categories (Electronics + Appliances) | 8 categories |
-|---|---|---|
-| Constant | $209.27 | $132.89 |
-| Linear (weight + text length) | $208.85 | $120.61 |
-| gpt-4.1-nano zero-shot | $173.65 | $119.79 |
-| Deep residual network (289M params, 5 CPU epochs) | $146.75 | $98.04 |
-| Bag of words + linear regression | $151.06 | $96.36 |
-| Random forest | $147.68 | $96.16 |
-| XGBoost | $141.06 | $95.87 |
-| 8-layer MLP | $150.40 | $94.21 |
-| RAG | $139.76 | $76.58 |
-| Ensemble | — | $73.12 |
+| Model | Avg. error |
+|---|---|
+| Constant | $132.89 |
+| Linear regression | $120.61 |
+| Zero-shot GPT-4.1-nano | $119.79 |
+| Deep residual NN (289M params) | $98.04 |
+| Bag of words + linear regression | $96.36 |
+| Random forest | $96.16 |
+| XGBoost | $95.87 |
+| MLP | $94.21 |
+| RAG | $76.58 |
+| Ensemble (RAG 89% + deep NN 11%) | $73.12 |
 
-Every learned model beats the constant baseline by roughly the same ~28% on both datasets; the 2-category set is harder in dollar terms because Electronics and Appliances have a much wider price spread.
-</details>
+The 200-item and 1,000-item tables are different samples, so compare numbers only within a table. QLoRA was run only on the 1,000-item set, and it is not part of the ensemble.
+
+## QLoRA fine-tune
+
+| | |
+|---|---|
+| Base model | Llama 3.2 3B |
+| Quantisation | 4-bit NF4 |
+| Adapter | LoRA, r = 32 |
+| Hardware | Kaggle T4 GPU, fp16 |
+| Training | 1 epoch on the 20,000-item train split, about 7.5 hours |
+| Evaluation | 1,000 held-out test items |
+| Result | $74.62 average error (±5.87), MSE 14,550, r² 49.8% |
+
+This is a single training run with one seed, so treat the gap to the ensemble as indicative, not final.
+
+Reproduce: Kaggle notebook `<KAGGLE-NOTEBOOK-URL>` (saved run with output), adapter weights `<HF-ADAPTER-URL>`, raw predictions in `docs/qlora_1000_predictions.json`.
 
 ## Architecture
 
 ```
-Amazon meta (8 × jsonl, ~20 GB) ─► parse ─► dedupe ─► price-weighted sample ─► LLM summaries ─► items
-                                                                                      │
-                     ┌────────────────────────────────────────────────────────────────┼──────────────────────┐
-                     ▼                                                                ▼                      ▼
-     baselines · XGBoost · MLP · deep residual network                    Chroma vector store (RAG)    QLoRA (optional, GPU)
-                                                                                      │
-RSS deal feeds ─► ScannerAgent ─► PlanningAgent ─► EnsembleAgent (RAG 89% · DNN 11%, clamped) ─► MessagingAgent ─► Pushover
+Amazon meta -> parse -> dedupe -> weighted sample -> LLM summaries -> prompt/completion pairs
+                                                                              |
+        baselines / XGBoost / deep NN        Chroma vector store (RAG)        QLoRA Llama 3.2 3B
+                         \                           |
+                          +-------- agents ----------+
+RSS deal feeds -> ScannerAgent -> PlanningAgent -> EnsembleAgent (RAG + deep NN)
+                                       |
+                                       +-> MessagingAgent -> Pushover
 ```
 
-## What this project adds
+## Layout
 
-Built on the "Price is Right" capstone from Ed Donner's *LLM Engineering* course, rebuilt from notebooks into a tested Python package:
-
-- **Installable package and CLI:** `src/` layout, `anvil` command for every stage, 69 offline tests (APIs and models faked).
-- **Resumable data pipeline:** a custom HTTP-range downloader that retries indefinitely and resumes from the exact byte (it completed a 5.35 GB file through 53 dropped connections), plus per-category parse caching.
-- **Checkpointed LLM summarization:** every result is written as it arrives, so a crash or Ctrl+C loses nothing; rate limits are retried using the server's suggested wait; runs automatically fall back from OpenAI to Groq when credit runs out. 22,000 products summarized for about $1.70.
-- **Ensemble without paid GPU hosting:** the fine-tuned Modal "specialist" is optional (`ANVIL_USE_SPECIALIST`); weights renormalize when it is off, and estimates are clamped to the training price range.
-- **Model-aware agents:** reasoning-only API parameters are sent only to reasoning models, so any OpenAI chat model can be dropped in.
+```
+src/pricer/
+├── config.py              env-driven settings and paths
+├── data/
+│   ├── items.py           Item model, prompt helpers, Hub push/pull
+│   ├── parser.py          raw Amazon row → Item (cleaning, weight parsing)
+│   ├── loaders.py         parallel category loading straight from the Hub jsonl files
+│   ├── curate.py          dedupe, price-weighted sampling, splits
+│   ├── summarize.py       LLM rewrites: Groq batch API or local/LiteLLM
+│   ├── prompts.py         token-truncated prompt/completion pairs for SFT
+│   └── store.py           local jsonl cache ⇄ HuggingFace Hub
+├── evaluation.py          Tester: error, 95% CI, MSE, r², plotly charts
+├── models/
+│   ├── baselines.py       random, constant, linear, bag-of-words LR, random forest, XGBoost, human
+│   ├── neural_network.py  8-layer MLP
+│   ├── deep_neural_network.py   residual network (train, save, load, infer)
+│   ├── frontier.py        zero-shot frontier LLMs via LiteLLM
+│   ├── finetune_openai.py OpenAI fine-tuning job + predictor
+│   └── qlora.py           QLoRA fine-tune of Llama 3.2 3B + local inference
+├── rag.py                 Chroma index, similarity search, RAG prompt, t-SNE data
+├── agents/                scanner, frontier, specialist, neural network, ensemble,
+│                          messaging, planning, autonomous (tool-calling), framework
+├── service.py             Modal GPU deployment of the fine-tuned model
+├── app.py                 Gradio dashboard
+└── cli.py                 `pricer` command
+```
 
 ## Setup
 
 ```bash
-python -m venv .venv && .venv\Scripts\activate      # macOS/Linux: source .venv/bin/activate
-pip install -e ".[ml,agents,dev]"                  # add "finetune" for QLoRA on a CUDA GPU
-copy .env.example .env                             # add OPENAI_API_KEY, GROQ_API_KEY, HF_TOKEN
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[all]"          # or pick extras: ml, batch, finetune, agents, dev
+cp .env.example .env             # add your keys
 ```
+
+Extras: `ml` (torch, xgboost) · `batch` (groq) · `finetune` (transformers, peft, trl, bitsandbytes) · `agents` (chromadb, sentence-transformers, modal, gradio, scraping) · `dev` (pytest, ruff).
+
+By default datasets are read from the pre-built public ones (`PRICER_HF_SOURCE=ed-donner`), so you can skip straight to evaluation. Set `PRICER_HF_USER` to your own username to push datasets and adapters.
 
 ## Usage
 
-Every command uses the lite dataset by default; add `--full` for the full one.
+Every command defaults to the lite dataset (20k train); add `--full` for 800k.
 
 ```bash
-# data
-anvil curate --per-category 100000 --sample-size 120000 --push   # download, parse, dedupe, sample, split
-anvil summarize local --workers 8 --push                         # LLM summaries (resumable)
+# 1. data (optional - pre-built datasets are on the Hub)
+pricer curate --push                       # load 8 categories, dedupe, sample, split
+pricer summarize submit                    # Groq batch API; later:
+pricer summarize fetch --push              #   collect results (re-runnable, state in data/batches)
+pricer summarize local --model groq/openai/gpt-oss-20b   # or rewrite synchronously via LiteLLM
+pricer prompts --push                      # prompt/completion pairs for fine-tuning
 
-# models
-anvil evaluate constant | linear | nlp-linear | random-forest | xgboost | nn
-anvil train-dnn --epochs 5 && anvil evaluate dnn
-anvil evaluate frontier
-anvil index && anvil evaluate rag
-anvil evaluate ensemble --size 1000
+# 2. models
+pricer evaluate xgboost
+pricer evaluate frontier --llm openai/gpt-4.1-nano
+pricer evaluate frontier --llm gemini/gemini-3-pro-preview --reasoning-effort low --size 50 --workers 2
+pricer train-dnn --full --epochs 5         # ~4h on an M1 GPU; weights → data/deep_neural_network.pth
+pricer evaluate dnn --chart
+pricer finetune-openai --train-size 100    # then: pricer finetune-openai --job ftjob-...
+pricer evaluate openai-ft --llm ft:gpt-4.1-nano-...:pricer:...
+pricer finetune-qlora --full --report-to wandb   # needs a CUDA GPU
+pricer evaluate qlora
 
-# agents
-anvil run                  # one pass: scan deals, price them, notify on the best
-anvil run --autonomous     # LLM tool-calling planner instead
-anvil app                  # Gradio dashboard, re-runs every 5 minutes
+# 3. RAG + agents
+pricer index --full                        # embed train items into data/products_vectorstore
+pricer evaluate rag
+make deploy                                # modal deploy -m pricer.service
+pricer evaluate ensemble
+pricer run                                 # one pass of the deal-hunting agents
+pricer run --autonomous                    # LLM tool-calling planner instead
+pricer app                                 # Gradio dashboard, re-runs every 5 minutes
 ```
 
-## Limitations
-
-- Trained on the lite set (20k items); the deep network in particular would benefit from the full dataset and a GPU.
-- Prices are capped at $999 by curation, so the system cannot value more expensive products.
-- The mix is weighted toward pricier items, and Automotive is down-weighted (5%), following the original sampling strategy.
+The deep neural network weights from the course are at the link in the original week 6 notebook; drop the file at `data/deep_neural_network.pth`.
 
 ## Development
 
 ```bash
-make test     # pytest
+make test     # pytest, fully offline: APIs and models are faked
 make lint     # ruff
+make format
 ```
+
+Tests cover the data pipeline, models and the tool-calling agents without network access.
+
+Never commit `.env`. Keep API keys out of the repo and rotate any that have been pasted into notebooks or chats.
