@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anvil Results</title>
+<style>
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--muted:#898781;--grid:#e1e0d9;--axis:#c3c2b7;--ring:rgba(11,11,11,.1);--llm:#2a78d6;--nn:#eb6834;--ml:#1baf7a;--good:#006300}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;--ink-2:#c3c2b7;--grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.1);--llm:#3987e5;--nn:#d95926;--ml:#199e70;--good:#0ca30c}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;--ink-2:#c3c2b7;--grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.1);--llm:#3987e5;--nn:#d95926;--ml:#199e70;--good:#0ca30c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:920px;margin:0 auto;padding:32px 16px 48px}
+.eyebrow{color:var(--muted);font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin:0}
+h1{font-size:26px;line-height:1.2;margin:4px 0 6px}
+h2{font-size:16px;margin:0}
+.sub{color:var(--ink-2);margin:0 0 24px;max-width:640px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px}
+.tile,.card{background:var(--surface);border:1px solid var(--ring);border-radius:12px}
+.tile{padding:14px 16px}
+.tile b{display:block;font-size:26px;font-weight:600;margin-bottom:2px}
+.tile span{color:var(--ink-2);font-size:13px}
+.card{padding:20px;margin-bottom:16px}
+.head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:6px}
+.tabs{display:inline-flex;flex-wrap:wrap;background:var(--page);border:1px solid var(--ring);border-radius:8px;padding:2px}
+.tabs button{border:0;background:none;color:var(--ink-2);font:inherit;font-size:13px;padding:6px 12px;border-radius:6px;cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--ring);font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--ink-2);margin:10px 0 4px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+#chart{width:100%}
+#chart svg{display:block;overflow:visible}
+.hit{fill:transparent;cursor:default}
+.hit:hover{fill:var(--grid);fill-opacity:.45}
+.note{color:var(--ink-2);font-size:13px;margin:12px 0 0}
+#tip{position:fixed;z-index:2;pointer-events:none;background:var(--surface);border:1px solid var(--ring);box-shadow:0 6px 20px rgba(0,0,0,.14);border-radius:8px;padding:10px 12px;font-size:13px;min-width:220px;opacity:0}
+#tip strong{display:block;margin-bottom:6px}
+#tip div{display:flex;justify-content:space-between;gap:16px;font-variant-numeric:tabular-nums}
+#tip .k{color:var(--ink-2)}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;margin-top:10px}
+th,td{text-align:right;padding:8px 8px;border-bottom:1px solid var(--grid);white-space:nowrap}
+th:nth-child(-n+2),td:nth-child(-n+2){text-align:left}
+th{color:var(--ink-2);font-weight:500}
+footer{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">Anvil · Results</p>
+<h1>Which model prices products best?</h1>
+<p class="sub">Predicting a product's price from its text description. Amazon Reviews 2023 across 8 categories: models trained on 20,000 products and tested on products they never saw.</p>
+<div class="tiles" id="tiles"></div>
+<section class="card">
+<div class="head"><h2 id="title"></h2><div class="tabs" role="tablist" id="tabs"></div></div>
+<div class="legend" id="legend"></div>
+<div id="chart"></div>
+<p class="note" id="note"></p>
+</section>
+<section class="card">
+<h2>All results</h2>
+<div class="wrap"><table id="table"></table></div>
+</section>
+<footer>Error is the average absolute difference between predicted and real price. ±95% CI is the confidence interval of that average. MSE punishes large misses. r² is the share of price variation the model explains.</footer>
+</main>
+<div id="tip"></div>
+<script>
+const FAMILIES={llm:"LLM-based",nn:"Neural network",ml:"Classical ML"};
+const RESULTS=[
+{model:"QLoRA Llama 3.2 3B",family:"llm",set:1000,error:74.62,ci:5.87,mse:14550,r2:49.8},
+{model:"Ensemble (RAG + DNN)",family:"llm",set:1000,error:77.11,ci:6.74,mse:17761,r2:38.7},
+{model:"RAG (gpt-4.1-nano)",family:"llm",set:1000,error:84.11,ci:8.09,r2:16.8},
+{model:"XGBoost",family:"ml",set:1000,error:96.43,ci:6.06,r2:34.9},
+{model:"Constant (training mean)",family:"ml",set:1000,error:127.29,ci:7.03,r2:-0.3},
+{model:"Ensemble (RAG + DNN)",family:"llm",set:200,error:73.12},
+{model:"RAG (gpt-4.1-nano)",family:"llm",set:200,error:76.58},
+{model:"MLP neural network",family:"nn",set:200,error:94.21},
+{model:"XGBoost",family:"ml",set:200,error:95.87},
+{model:"Random forest",family:"ml",set:200,error:96.16},
+{model:"Bag of words + LR",family:"ml",set:200,error:96.36},
+{model:"Deep residual NN",family:"nn",set:200,error:98.04},
+{model:"Zero-shot gpt-4.1-nano",family:"llm",set:200,error:119.79},
+{model:"Linear regression",family:"ml",set:200,error:120.61},
+{model:"Constant (training mean)",family:"ml",set:200,error:132.89}
+];
+const VIEWS={
+e1000:{tab:"Error · 1,000 products",set:1000,key:"error",title:"Average error on 1,000 products (lower is better)",note:"Whiskers show the 95% confidence interval. QLoRA and the ensemble overlap on average error, but QLoRA's MSE is 18% lower: it makes fewer big misses."},
+e200:{tab:"Error · 200 products",set:200,key:"error",title:"Average error on 200 products (lower is better)",note:"Every earlier model was compared on this set. QLoRA was trained later and evaluated on the 1,000-product set only."},
+r1000:{tab:"r² · 1,000 products",set:1000,key:"r2",title:"r² on 1,000 products (higher is better)",note:"RAG has a low average error but a low r²: a few very large misses pull it down. QLoRA explains the most variation."}
+};
+const $=s=>document.querySelector(s);
+const money=v=>"$"+v.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt=(v,k)=>v==null?"—":k==="r2"?v.toFixed(1)+"%":k==="mse"?v.toLocaleString("en-US"):money(v);
+const baseline=set=>RESULTS.find(r=>r.set===set&&r.model.startsWith("Constant"));
+const colour=f=>`var(--${f})`;
+let view="e1000";
+function tiles(){
+const best=RESULTS.filter(r=>r.set===1000).sort((a,b)=>a.error-b.error)[0],base=baseline(1000),n=new Set(RESULTS.map(r=>r.model)).size;
+$("#tiles").innerHTML=[
+[money(best.error),`average error by ${best.model}, the best of ${n} models`],
+[Math.round((1-best.error/base.error)*100)+"% lower",`error than the constant baseline (${money(base.error)})`],
+[fmt(best.r2,"r2"),"r², the highest of any model"],
+["1 epoch","of QLoRA on 20k products, on a free Kaggle T4 GPU"]
+].map(([b,s])=>`<div class="tile"><b>${b}</b><span>${s}</span></div>`).join("");
+}
+function tabs(){
+$("#tabs").innerHTML=Object.entries(VIEWS).map(([k,v])=>`<button role="tab" data-v="${k}" aria-selected="${k===view}">${v.tab}</button>`).join("");
+$("#legend").innerHTML=Object.entries(FAMILIES).map(([k,v])=>`<span><i style="background:${colour(k)}"></i>${v}</span>`).join("");
+}
+function ticks(lo,hi){
+const p=10**Math.floor(Math.log10((hi-lo)/4)),step=[1,2,2.5,5,10,20].map(m=>m*p).find(s=>(hi-lo)/s<=6);
+const a=Math.floor(lo/step)*step,b=Math.ceil(hi/step)*step,out=[];
+for(let t=a;t<=b+step/1e6;t+=step)out.push(+t.toFixed(6));
+return out;
+}
+function bar(a,b,y,h){
+const r=Math.min(4,Math.abs(b-a)/2,h/2),d=b>=a?1:-1;
+return `M${a},${y}H${b-d*r}Q${b},${y} ${b},${y+r}V${y+h-r}Q${b},${y+h} ${b-d*r},${y+h}H${a}Z`;
+}
+function rowsFor(v){
+return RESULTS.filter(r=>r.set===v.set&&r[v.key]!=null).sort((a,b)=>v.key==="r2"?b.r2-a.r2:a.error-b.error);
+}
+function render(){
+const v=VIEWS[view],rows=rowsFor(v),k=v.key,W=$("#chart").clientWidth,R=100,rowH=46,top=6,H=top+rows.length*rowH+26;
+const ends=rows.map(r=>r[k]+(k==="error"&&r.ci?r.ci:0)),lo=Math.min(0,...rows.map(r=>r[k])),hi=Math.max(...ends),tk=ticks(lo>-hi*.05?0:lo,hi);
+const min=tk[0],max=tk[tk.length-1],x=d=>(d-min)/(max-min)*(W-R),label=t=>k==="r2"?t+"%":"$"+t;
+let s=`<svg width="${W}" height="${H}" role="img" aria-label="${v.title}">`;
+s+=tk.map(t=>`<line x1="${x(t)}" x2="${x(t)}" y1="${top}" y2="${H-22}" stroke="var(${t===0?"--axis":"--grid"})"/><text x="${x(t)}" y="${H-6}" fill="var(--muted)" font-size="12" text-anchor="${x(t)<12?"start":"middle"}">${label(t)}</text>`).join("");
+rows.forEach((r,i)=>{
+const y=top+i*rowH,by=y+20,bh=14,val=r[k],ci=k==="error"?r.ci:null,end=x(Math.max(val+(ci||0),0));
+s+=`<rect class="hit" data-i="${i}" x="0" y="${y}" width="${W}" height="${rowH-4}" rx="6"/>`;
+s+=`<g pointer-events="none"><text x="${x(0)+(x(0)>0?4:0)}" y="${y+14}" fill="var(--ink)" font-size="13" font-weight="${i?400:600}">${r.model}</text>`;
+s+=`<path d="${bar(x(0),x(val),by,bh)}" fill="${colour(r.family)}"/>`;
+if(ci)s+=`<path d="M${x(val-ci)},${by+bh/2}H${x(val+ci)}M${x(val-ci)},${by+3}V${by+bh-3}M${x(val+ci)},${by+3}V${by+bh-3}" stroke="var(--ink-2)" stroke-width="1.5"/>`;
+s+=`<text x="${end+6}" y="${by+11}" fill="var(--ink${i?"-2":""})" font-size="12" font-weight="${i?400:600}">${fmt(val,k)}${i?"":" · best"}</text></g>`;
+});
+$("#chart").innerHTML=s+"</svg>";
+$("#title").textContent=v.title;
+$("#note").textContent=v.note;
+$("#chart").querySelectorAll(".hit").forEach(el=>{
+const r=rows[+el.dataset.i],show=e=>tip(e,r);
+el.addEventListener("pointermove",show);
+el.addEventListener("pointerdown",show);
+el.addEventListener("pointerleave",()=>$("#tip").style.opacity=0);
+});
+}
+function tip(e,r){
+const t=$("#tip"),base=baseline(r.set),gain=r===base?"baseline":Math.round((1-r.error/base.error)*100)+"% lower";
+t.innerHTML=`<strong>${r.model}</strong>`+[
+["Type",`<span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${colour(r.family)}"></i>${FAMILIES[r.family]}</span>`],
+["Test set",r.set.toLocaleString("en-US")+" products"],
+["Avg error",fmt(r.error,"error")+(r.ci?` ±${money(r.ci)}`:"")],
+["vs baseline",gain],
+["MSE",fmt(r.mse,"mse")],
+["r²",fmt(r.r2,"r2")]
+].map(([a,b])=>`<div><span class="k">${a}</span><span>${b}</span></div>`).join("");
+const w=t.offsetWidth,h=t.offsetHeight;
+t.style.left=Math.max(8,Math.min(e.clientX+14,innerWidth-w-8))+"px";
+t.style.top=Math.max(8,Math.min(e.clientY+14,innerHeight-h-8))+"px";
+t.style.opacity=1;
+}
+function table(){
+const rows=[...RESULTS].sort((a,b)=>b.set-a.set||a.error-b.error);
+$("#table").innerHTML="<tr><th>Model</th><th>Type</th><th>Test set</th><th>Avg error</th><th>±95% CI</th><th>MSE</th><th>r²</th></tr>"+rows.map(r=>`<tr><td>${r.model}</td><td>${FAMILIES[r.family]}</td><td>${r.set.toLocaleString("en-US")}</td><td>${fmt(r.error,"error")}</td><td>${r.ci?money(r.ci):"—"}</td><td>${fmt(r.mse,"mse")}</td><td>${fmt(r.r2,"r2")}</td></tr>`).join("");
+}
+$("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;view=b.dataset.v;tabs();render()});
+addEventListener("resize",render);
+tiles();tabs();render();table();
+</script>
+</body>
+</html>
